@@ -223,19 +223,10 @@ scrunchAllLibsTogetherInOneLibPerPlatform()
 {
     cd $BOOST_SRC
 
-    for ARCH in $ARCH_IOS $ARCH_SIMULATOR
-    do
-        mkdir -p $IOSBUILDDIR/$ARCH/obj
-    done
-
-    ALL_LIBS=""
-
     echo Building fat libraries...
 
     for NAME in $BOOST_LIBS
     do
-        ALL_LIBS="$ALL_LIBS libboost_$NAME.a"
-
         LIBS=
 
         if [ ! -z "$ARCH_IOS" ]
@@ -245,7 +236,7 @@ scrunchAllLibsTogetherInOneLibPerPlatform()
 
         if [ ! -z "$ARCH_SIMULATOR" ]
         then
-            LIBS="iphonesim-build/stage/lib/libboost_$NAME.a"
+            LIBS="$LIBS iphonesim-build/stage/lib/libboost_$NAME.a"
         fi
 
         lipo -c $LIBS -o $IOSBUILDDIR/libboost_$NAME.a
