@@ -23,7 +23,7 @@
 
 : ${BOOST_LIBS:="thread filesystem system"}
 : ${IPHONE_SDKVERSION:=`xcodebuild -showsdks | grep iphoneos | egrep "[[:digit:]]+\.[[:digit:]]+" -o | tail -1`}
-: ${OSX_SDKVERSION:=10.8}
+: ${XCODE_VERSION:=$(xcrun xcodebuild -version | head -n1 | tr -Cd '[:digit:].')}
 : ${XCODE_ROOT:=`xcode-select -print-path`}
 : ${EXTRA_CPPFLAGS:="-DBOOST_AC_USE_PTHREADS -DBOOST_SP_USE_PTHREADS -std=c++11 -stdlib=libc++"}
 : ${JOBS:=16}
@@ -38,7 +38,7 @@
 
 : ${TARBALLDIR:=`pwd`}
 : ${SRCDIR:=`pwd`}
-: ${PATCHDIR:="$(cd $(dirname $0); pwd)/boost-patches"}
+: ${PATCHESDIR:="$(cd $(dirname $0); pwd)/patches"}
 : ${IOSBUILDDIR:=`pwd`/ios/build}
 : ${PREFIXDIR:=`pwd`/ios/prefix}
 : ${COMPILER:="clang++"}
@@ -89,11 +89,18 @@ cleanEverythingReadyToStart()
 
 #===============================================================================
 
+# version() from https://stackoverflow.com/a/37939589/3938401
+version()
+{
+    echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }';
+}
+
 downloadBoost()
 {
     if [ ! -s $TARBALLDIR/boost_${BOOST_VERSION2}.tar.bz2 ]; then
         echo "Downloading boost ${BOOST_VERSION}"
-        curl -L -o $TARBALLDIR/boost_${BOOST_VERSION2}.tar.bz2 "http://netcologne.dl.sourceforge.net/project/boost/boost/${BOOST_VERSION}/boost_${BOOST_VERSION2}.tar.bz2"
+        curl -L -o $TARBALLDIR/boost_${BOOST_VERSION2}.tar.bz2 \
+             "http://netcologne.dl.sourceforge.net/project/boost/boost/${BOOST_VERSION}/boost_${BOOST_VERSION2}.tar.bz2"
     fi
 
     doneSection
@@ -110,6 +117,23 @@ unpackBoost()
     [ -d $SRCDIR ]    || mkdir -p $SRCDIR
     [ -d $BOOST_SRC ] || ( cd $SRCDIR; tar xfj $BOOST_TARBALL )
     [ -d $BOOST_SRC ] && echo "    ...unpacked as $BOOST_SRC"
+
+    doneSection
+}
+
+#===============================================================================
+
+patchBoost()
+{
+    echo Patching boost in $BOOST_SRC...
+
+    if [ "$(version "$BOOST_VERSION")" -le "$(version "1.73.0")" ] &&
+           [ "$(version "$XCODE_VERSION")" -ge "$(version "11.4")" ]
+    then
+        # https://github.com/boostorg/build/pull/560
+        (cd "$BOOST_SRC" && patch --forward -p1 -d "$BOOST_SRC/tools/build" \
+                                  < "$PATCHESDIR/xcode-11.4.patch")
+    fi
 
     doneSection
 }
@@ -179,13 +203,13 @@ buildBoostForIPhoneOS()
 
     if [ ! -z "$ARCH_IOS" ]
     then
-        ./bjam -j$JOBS --build-dir=iphone-build --stagedir=iphone-build/stage \
+        ./b2 -j$JOBS --build-dir=iphone-build --stagedir=iphone-build/stage \
             --prefix=$PREFIXDIR toolset=darwin architecture=arm \
             target-os=iphone macosx-version=iphone-${IPHONE_SDKVERSION} \
             define=_LITTLE_ENDIAN link=static stage
 
         # Install this one so we can copy the includes for the frameworks...
-        ./bjam -j$JOBS --build-dir=iphone-build --stagedir=iphone-build/stage \
+        ./b2 -j$JOBS --build-dir=iphone-build --stagedir=iphone-build/stage \
             --prefix=$PREFIXDIR toolset=darwin architecture=arm \
             target-os=iphone macosx-version=iphone-${IPHONE_SDKVERSION} \
             define=_LITTLE_ENDIAN link=static install
@@ -197,7 +221,7 @@ buildBoostForIPhoneOS()
 
     if [ ! -z "$ARCH_SIMULATOR" ]
     then
-        ./bjam -j$JOBS --build-dir=iphonesim-build \
+        ./b2 -j$JOBS --build-dir=iphonesim-build \
             --stagedir=iphonesim-build/stage \
             --toolset=darwin-${IPHONE_SDKVERSION}~iphonesim architecture=x86 \
             target-os=iphone macosx-version=iphonesim-${IPHONE_SDKVERSION} \
@@ -205,7 +229,7 @@ buildBoostForIPhoneOS()
 
         if [ "$INSTALLED" != 1 ]
         then
-            ./bjam -j$JOBS --build-dir=iphonesim-build \
+            ./b2 -j$JOBS --build-dir=iphonesim-build \
                 --stagedir=iphonesim-build/stage \
                 --toolset=darwin-${IPHONE_SDKVERSION}~iphonesim \
                 architecture=x86 target-os=iphone \
@@ -298,8 +322,8 @@ echo "BOOST_LIBS:        $BOOST_LIBS"
 echo "BOOST_SRC:         $BOOST_SRC"
 echo "IOSBUILDDIR:       $IOSBUILDDIR"
 echo "PREFIXDIR:         $PREFIXDIR"
-echo "IOSFRAMEWORKDIR:   $IOSFRAMEWORKDIR"
 echo "IPHONE_SDKVERSION: $IPHONE_SDKVERSION"
+echo "XCODE_VERSION:     $XCODE_VERSION"
 echo "XCODE_ROOT:        $XCODE_ROOT"
 echo "COMPILER:          $COMPILER"
 echo "SIMULATOR:         $SIMULATOR"
@@ -307,6 +331,7 @@ echo
 
 downloadBoost
 unpackBoost
+patchBoost
 bootstrapBoost
 updateBoost
 buildBoostForIPhoneOS
